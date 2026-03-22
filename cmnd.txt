@@ -1,0 +1,305 @@
+frontend
+cd santosh\PD_Project\PD_Detector
+python -m venv venv
+venv\Scripts\activate
+npm install
+nmp run dev
+
+
+
+Backend
+
+cd backend
+python app.py
+
+
+Rohan Patil
+rohanpatil12@gmail.com	
+Rohan@12
+
+
+// image.py
+import os
+import torch
+import torch.nn as nn
+from torchvision import transforms
+from PIL import Image
+import pickle
+
+# ================================
+# DEVICE
+# ================================
+DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+# ================================
+# PATHS
+# ================================
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+
+MODEL_PATH = os.path.join(BASE_DIR, "cnn_image_model.pth")        # Parkinson model
+LABELS_PATH = os.path.join(BASE_DIR, "image_labels.pkl")          # Parkinson labels
+BRAIN_MODEL_PATH = os.path.join(BASE_DIR, "brain_classifier.pth") # Brain vs non-brain model
+
+# ================================
+# IMAGE TRANSFORMS
+# ================================
+IMG_SIZE = 128
+
+transform = transforms.Compose([
+    transforms.Resize((IMG_SIZE, IMG_SIZE)),
+    transforms.ToTensor(),
+    transforms.Normalize(mean=[0.5, 0.5, 0.5],
+                         std=[0.5, 0.5, 0.5])
+])
+
+# IMPORTANT: brain model also uses RGB image, so use 3-channel normalization
+brain_transform = transforms.Compose([
+    transforms.Resize((IMG_SIZE, IMG_SIZE)),
+    transforms.ToTensor(),
+    transforms.Normalize(mean=[0.5, 0.5, 0.5],
+                         std=[0.5, 0.5, 0.5])
+])
+
+# ================================
+# PARKINSON CNN MODEL
+# ================================
+class ParkinsonCNN(nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.features = nn.Sequential(
+            nn.Conv2d(3, 32, 3, padding=1),
+            nn.ReLU(),
+            nn.MaxPool2d(2),
+            nn.Conv2d(32, 64, 3, padding=1),
+            nn.ReLU(),
+            nn.MaxPool2d(2)
+        )
+        self.classifier = nn.Sequential(
+            nn.Flatten(),
+            nn.Linear(64 * 32 * 32, 128),
+            nn.ReLU(),
+            nn.Dropout(0.3),
+            nn.Linear(128, 2)
+        )
+
+    def forward(self, x):
+        x = self.features(x)
+        return self.classifier(x)
+
+# ================================
+# BRAIN VS NON-BRAIN CNN MODEL
+# ================================
+class BrainCNN(nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.features = nn.Sequential(
+            nn.Conv2d(3, 32, 3, padding=1),
+            nn.ReLU(),
+            nn.MaxPool2d(2),
+            nn.Conv2d(32, 64, 3, padding=1),
+            nn.ReLU(),
+            nn.MaxPool2d(2),
+            nn.Conv2d(64, 128, 3, padding=1),
+            nn.ReLU(),
+            nn.MaxPool2d(2)
+        )
+        self.classifier = nn.Sequential(
+            nn.Flatten(),
+            nn.Linear(128 * 16 * 16, 128),
+            nn.ReLU(),
+            nn.Linear(128, 1),
+            nn.Sigmoid()
+        )
+
+    def forward(self, x):
+        x = self.features(x)
+        return self.classifier(x)
+
+# ================================
+# LOAD MODELS
+# ================================
+parkinson_model = ParkinsonCNN().to(DEVICE)
+parkinson_model.load_state_dict(torch.load(MODEL_PATH, map_location=DEVICE))
+parkinson_model.eval()
+
+with open(LABELS_PATH, "rb") as f:
+    CLASS_NAMES = pickle.load(f)
+
+brain_model = BrainCNN().to(DEVICE)
+brain_model.load_state_dict(torch.load(BRAIN_MODEL_PATH, map_location=DEVICE))
+brain_model.eval()
+
+# ================================
+# FUNCTIONS
+# ================================
+def predict_brain_image(image_path: str):
+    """Returns ('brain' or 'not-brain', confidence_percent)"""
+    image = Image.open(image_path).convert("RGB")
+    image = brain_transform(image).unsqueeze(0).to(DEVICE)
+
+    with torch.no_grad():
+        output = brain_model(image)
+        pred = output.item()  # sigmoid output
+
+    if pred >= 0.5:
+        return "brain", round(pred * 100, 2)
+    else:
+        return "not-brain", round((1 - pred) * 100, 2)
+
+def predict_image(image_path: str):
+    """Main MRI Parkinson prediction function"""
+    if not os.path.exists(image_path):
+        return {"error": "Image file not found"}
+
+    try:
+        img = Image.open(image_path).convert("RGB")
+    except Exception:
+        return {"error": "Invalid image file"}
+
+    # Step 1: Brain check
+    brain_result, brain_confidence = predict_brain_image(image_path)
+
+    # Soft validation instead of hard rejection
+    if brain_result == "not-brain" and brain_confidence >= 80:
+        return {"error": "This does not appear to be a valid brain MRI image"}
+
+    # Step 2: Parkinson prediction
+    image = transform(img).unsqueeze(0).to(DEVICE)
+
+    with torch.no_grad():
+        outputs = parkinson_model(image)
+        probs = torch.softmax(outputs, dim=1)
+        confidence, predicted = torch.max(probs, 1)
+
+    label = CLASS_NAMES[predicted.item()]
+    confidence_percent = round(confidence.item() * 100, 2)
+
+    return {
+        "prediction": label,
+        "confidence": confidence_percent,
+        "brain_check": brain_result,
+        "brain_confidence": brain_confidence
+    }
+
+# ================================
+# RUN DIRECTLY
+# ================================
+if __name__ == "__main__":
+    import sys
+    if len(sys.argv) != 2:
+        print("Usage: python predict_image.py <image_path>")
+        sys.exit(1)
+
+    image_path = sys.argv[1]
+    result = predict_image(image_path)
+
+    if "error" in result:
+        print("Error:", result["error"])
+    else:
+        print("Prediction:", result["prediction"])
+        print("Confidence:", result["confidence"])              
+
+
+
+
+
+
+
+
+
+
+
+// team//
+
+import { Card } from "@/components/ui/card";
+import { Github, Linkedin, Mail } from "lucide-react";
+ 
+const TeamSection = () => {
+  const team = [
+    {
+      name: "Santosh Babar",
+      role: "Backend Developer, ML Engineer & Data Scientist",
+      description:
+        "Specialized in machine learning model development, Flask API integration, data analysis and model optimization.",
+      initials: "SB",
+      color: "from-primary to-secondary",
+    },
+    {
+      name: "Pranav Nikam",
+      role: "Frontend Developer & UI/UX Designer",
+      description:
+        "Expert in creating beautiful and responsive user interfaces while designing intuitive and accessible healthcare interfaces.",
+      initials: "PN",
+      color: "from-secondary to-accent",
+    },
+  ];
+ 
+  return (
+    <section id="team" className="py-20 bg-muted/30">
+      <div className="container mx-auto px-4">
+        <div className="max-w-6xl mx-auto">
+          <div className="text-center mb-16 animate-fade-in">
+            <h2 className="text-4xl md:text-5xl font-bold mb-4">
+              Our <span className="text-gradient">Team</span>
+            </h2>
+            <p className="text-lg text-muted-foreground">
+              Meet the talented individuals behind this project
+            </p>
+          </div>
+ 
+          <div className="grid md:grid-cols-2 lg:grid-cols-2 gap-8 justify-center">
+            {team.map((member, index) => (
+              <Card
+                key={index}
+                className="glass-card p-6 text-center hover:scale-105 transition-all duration-300 animate-fade-in-up group"
+                style={{ animationDelay: `${index * 0.1}s` }}
+              >
+                <div
+                  className={`w-24 h-24 rounded-full bg-gradient-to-br ${member.color} mx-auto mb-4 flex items-center justify-center text-white text-2xl font-bold shadow-lg group-hover:shadow-xl transition-shadow`}
+                >
+                  {member.initials}
+                </div>
+ 
+                <h3 className="text-xl font-bold mb-1">{member.name}</h3>
+                <p className="text-primary font-medium mb-3 text-sm">
+                  {member.role}
+                </p>
+                <p className="text-sm text-muted-foreground mb-4">
+                  {member.description}
+                </p>
+ 
+                <div className="flex items-center justify-center gap-3">
+                  <a
+                    href="#"
+                    className="text-muted-foreground hover:text-primary transition-colors"
+                    aria-label="LinkedIn"
+                  >
+                    <Linkedin className="h-5 w-5" />
+                  </a>
+                  <a
+                    href="#"
+                    className="text-muted-foreground hover:text-primary transition-colors"
+                    aria-label="GitHub"
+                  >
+                    <Github className="h-5 w-5" />
+                  </a>
+                  <a
+                    href="#"
+                    className="text-muted-foreground hover:text-primary transition-colors"
+                    aria-label="Email"
+                  >
+                    <Mail className="h-5 w-5" />
+                  </a>
+                </div>
+              </Card>
+            ))}
+          </div>
+        </div>
+      </div>
+    </section>
+  );
+};
+ 
+export default TeamSection;
+ 
+
